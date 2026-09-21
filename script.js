@@ -457,3 +457,29 @@ if (productsContainer && separatorFill) {
   handleGalleryScroll();
 }
 
+// ==========================================
+// INTERAKSI TAP / KLIK KARTU MEMBER DI MOBILE
+// ==========================================
+const memberCards = document.querySelectorAll(".member-card");
+
+memberCards.forEach((card) => {
+  card.addEventListener("click", (e) => {
+    // Jika kartu yang disentuh sudah aktif, tutup (toggle off)
+    const isAlreadyActive = card.classList.contains("active");
+
+    // Tutup kartu aktif lainnya
+    memberCards.forEach((c) => c.classList.remove("active"));
+
+    // Jika belum aktif, aktifkan kartu yang disentuh
+    if (!isAlreadyActive) {
+      card.classList.add("active");
+    }
+  });
+});
+
+// Tutup kartu jika menyentuh area kosong di luar kartu
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".member-card")) {
+    memberCards.forEach((c) => c.classList.remove("active"));
+  }
+});
