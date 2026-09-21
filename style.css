@@ -876,7 +876,7 @@ h2 em {
 .marquee-track {
   display: inline-block;
   font-family: "DM Mono";
-  font-size: 15px;
+  font-size: 10px;
   letter-spacing: .12em;
   color: #777;
   animation: marquee 28s linear infinite;
