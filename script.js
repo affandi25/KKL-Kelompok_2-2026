@@ -174,12 +174,34 @@ if (wallForm && wallInput && wallMessage) {
   });
 }
 
+// ==========================================
+// SUPABASE DATABASE - KESAN & PESAN
+// ==========================================
+const SUPABASE_DB_URL = "https://pwvegvjtocalpazfnazr.supabase.co";
+// TODO: Tempelkan anon key Anda di bawah ini (dari Supabase Dashboard > Project Settings > API > anon public)
+const SUPABASE_ANON_KEY = "sb_publishable_Ry_ZI000bUPxmJEoEOqJog_3NbfCY4a";
+
+const supabaseClient =
+  window.supabase && SUPABASE_ANON_KEY !== "MASUKKAN_ANON_KEY_ANDA_DI_SINI"
+    ? window.supabase.createClient(SUPABASE_DB_URL, SUPABASE_ANON_KEY)
+    : null;
+
 const commentForm = document.getElementById("commentForm");
 const commentName = document.getElementById("commentName");
 const commentText = document.getElementById("commentText");
 const commentList = document.getElementById("commentList");
 const clearCommentsBtn = document.getElementById("clearCommentsBtn");
 const commentStorageKey = "kknMetalComments";
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 function getStoredComments() {
   try {
@@ -194,10 +216,8 @@ function saveComments(comments) {
   localStorage.setItem(commentStorageKey, JSON.stringify(comments));
 }
 
-function renderComments() {
+function renderLocalComments(comments) {
   if (!commentList) return;
-
-  const comments = getStoredComments();
   commentList.innerHTML = "";
 
   if (!comments.length) {
@@ -213,19 +233,70 @@ function renderComments() {
     item.className = "comment-item";
     item.innerHTML = `
       <div class="comment-item-top">
-        <strong>${comment.name}</strong>
-        <button type="button" class="delete-comment-btn" data-index="${index}" aria-label="Hapus komentar ${comment.name}">Hapus</button>
+        <strong>${escapeHtml(comment.name)}</strong>
+        <button type="button" class="delete-comment-btn" data-index="${index}" aria-label="Hapus komentar ${escapeHtml(comment.name)}">Hapus</button>
       </div>
-      <p>“${comment.message}”</p>
+      <p>“${escapeHtml(comment.message)}”</p>
     `;
     commentList.appendChild(item);
   });
 }
 
-if (commentForm && commentName && commentText && commentList) {
-  renderComments();
+// Mengambil komentar dari Supabase Database (atau fallback ke local storage jika belum ada anon key)
+async function fetchComments() {
+  if (!commentList) return;
 
-  commentForm.addEventListener("submit", (event) => {
+  if (!supabaseClient) {
+    const localComments = getStoredComments();
+    renderLocalComments(localComments);
+    return;
+  }
+
+  commentList.innerHTML = "<p class='comment-empty'>Memuat pesan...</p>";
+
+  const { data: comments, error } = await supabaseClient
+    .from("comments")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Gagal mengambil komentar dari Supabase:", error);
+    commentList.innerHTML = "<p class='comment-empty'>Gagal memuat pesan. Pastikan tabel 'comments' sudah dibuat di Supabase.</p>";
+    return;
+  }
+
+  commentList.innerHTML = "";
+
+  if (!comments || comments.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "comment-empty";
+    empty.textContent = "Belum ada komentar. Jadilah yang pertama!";
+    commentList.appendChild(empty);
+    return;
+  }
+
+  comments.forEach((comment) => {
+    const item = document.createElement("article");
+    item.className = "comment-item";
+    item.innerHTML = `
+      <div class="comment-item-top">
+        <strong>${escapeHtml(comment.name)}</strong>
+        <button type="button" class="delete-comment-btn" data-id="${comment.id}" aria-label="Hapus komentar ${escapeHtml(comment.name)}">Hapus</button>
+      </div>
+      <p>“${escapeHtml(comment.message)}”</p>
+    `;
+    commentList.appendChild(item);
+  });
+}
+
+// Inisialisasi tampilan komentar
+if (commentList) {
+  fetchComments();
+}
+
+// Mengirim komentar
+if (commentForm && commentName && commentText) {
+  commentForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const name = commentName.value.trim();
@@ -236,33 +307,117 @@ if (commentForm && commentName && commentText && commentList) {
       return;
     }
 
-    const comments = getStoredComments();
-    comments.unshift({ name, message });
-    saveComments(comments);
-    renderComments();
-    commentForm.reset();
+    const submitBtn = commentForm.querySelector("button[type='submit']");
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "MENGIRIM...";
+    }
+
+    if (!supabaseClient) {
+      const comments = getStoredComments();
+      comments.unshift({ name, message });
+      saveComments(comments);
+      renderLocalComments(comments);
+      commentForm.reset();
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "POST ↗";
+      }
+      alert("Catatan: Komentar disimpan di lokal browser. Agar bisa dilihat oleh semua orang di internet, silakan ganti 'MASUKKAN_ANON_KEY_ANDA_DI_SINI' di script.js dengan Anon Key Supabase Anda.");
+      return;
+    }
+
+    const { error } = await supabaseClient
+      .from("comments")
+      .insert([{ name, message }]);
+
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "POST ↗";
+    }
+
+    if (error) {
+      console.error("Supabase insert error:", error);
+      alert("Gagal mengirim pesan: " + error.message);
+    } else {
+      commentForm.reset();
+      fetchComments();
+    }
   });
 }
 
+// Menghapus komentar
 if (commentList) {
-  commentList.addEventListener("click", (event) => {
+  commentList.addEventListener("click", async (event) => {
     const button = event.target.closest(".delete-comment-btn");
     if (!button) return;
 
-    const index = Number(button.dataset.index);
-    if (Number.isNaN(index)) return;
+    if (!confirm("Apakah Anda yakin ingin menghapus komentar ini?")) {
+      return;
+    }
 
-    const comments = getStoredComments();
-    comments.splice(index, 1);
-    saveComments(comments);
-    renderComments();
+    if (!supabaseClient) {
+      const index = Number(button.dataset.index);
+      if (!Number.isNaN(index)) {
+        const comments = getStoredComments();
+        comments.splice(index, 1);
+        saveComments(comments);
+        renderLocalComments(comments);
+      }
+      return;
+    }
+
+    const id = button.dataset.id;
+    if (!id) return;
+
+    button.disabled = true;
+    button.textContent = "...";
+
+    const { error } = await supabaseClient
+      .from("comments")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Gagal menghapus komentar:", error);
+      alert("Gagal menghapus komentar: " + error.message);
+      button.disabled = false;
+      button.textContent = "Hapus";
+    } else {
+      fetchComments();
+    }
   });
 }
 
+// Tombol Hapus Semua Komentar
 if (clearCommentsBtn) {
-  clearCommentsBtn.addEventListener("click", () => {
-    localStorage.removeItem(commentStorageKey);
-    renderComments();
+  clearCommentsBtn.addEventListener("click", async () => {
+    if (!confirm("Apakah Anda yakin ingin menghapus semua komentar?")) {
+      return;
+    }
+
+    const pin = prompt("Masukkan PIN admin untuk menghapus semua komentar:");
+    if (pin !== "admin" && pin !== "1234") {
+      alert("PIN salah atau aksi dibatalkan.");
+      return;
+    }
+
+    if (!supabaseClient) {
+      localStorage.removeItem(commentStorageKey);
+      renderLocalComments([]);
+      return;
+    }
+
+    const { error } = await supabaseClient
+      .from("comments")
+      .delete()
+      .neq("id", 0);
+
+    if (error) {
+      alert("Gagal menghapus semua komentar: " + error.message);
+    } else {
+      fetchComments();
+    }
   });
 }
 
